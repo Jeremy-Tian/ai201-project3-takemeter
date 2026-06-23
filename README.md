@@ -27,6 +27,18 @@ pre-annotation design are in [`planning.md`](planning.md).
 | `observation` | A focused comment on a single technical element, one scene, or one performance, rather than the whole work. |
 | `inquiry` | A post whose primary purpose is to ask a question or prompt community discussion. |
 
+**Two examples per label:**
+
+- **`critique`**
+  - *"Across his late period, Kim Ki-duk uses color not as decoration but as a moral register — the shift to muted palettes tracks each protagonist's loss of innocence, and reading the films chronologically makes that arc unmistakable."*
+  - *"Tarkovsky's long takes aren't slow for their own sake; they force the viewer into the film's own sense of time, which is why summarizing the plot of Stalker tells you nothing about what the film actually is."*
+- **`observation`**
+  - *"I only noticed on rewatch that the blocking in the dinner scene mirrors a stage play — everyone stays on their side of the table until the accusation lands."*
+  - *"The match cut from the bone to the spacecraft is famous, but the sound edit underneath it is what actually sells the jump."*
+- **`inquiry`**
+  - *"Why do you think the French New Wave still resonates with modern independent filmmakers, when so many other movements feel dated?"*
+  - *"What's a film you initially disliked but came to admire after a second viewing, and what changed for you?"*
+
 ## 2. Repository contents
 
 | File | What it is |
@@ -41,30 +53,86 @@ pre-annotation design are in [`planning.md`](planning.md).
 
 ## 3. Dataset
 
-- **Source:** public r/TrueFilm posts with body text, via the Reddit API / public JSON.
-- **Annotation:** each post read and labeled by hand using the §1 definitions;
-  ambiguous cases logged in the `notes` column (see `planning.md` §3).
+- **Source:** public r/TrueFilm posts with body text, collected via the Reddit
+  public JSON / API across the hot, top, new, and rising sortings (the multi-sorting
+  spread is to surface `inquiry`-type posts that rarely reach "hot"). See
+  [`collect_posts.py`](collect_posts.py).
+- **Labeling process:** each post was read individually and assigned the single
+  label matching its *primary intent* using the §1 definitions and the
+  `critique`/`observation` scope rule and `inquiry` "remove-the-question" test from
+  `planning.md` §3. Genuinely ambiguous cases were recorded in a `notes` column so
+  the same tie-break was applied consistently whenever the pattern recurred. The
+  test set was labeled by hand without any AI pre-labeling (see §7).
 
 > **⬜ FILL IN — dataset stats** (count from your `labeled_dataset.csv`):
 > - Total labeled examples: `[N]`
 > - Distribution: critique `[n]` · observation `[n]` · inquiry `[n]`
 > - Largest class share: `[xx%]` (must be ≤ 70% — see planning.md §4)
 
+**Three difficult-to-label examples and my decisions — ⬜ FILL IN** (pull real ones
+from your `notes` column):
+
+| # | Post (excerpt) | Candidate labels | Decision + reasoning |
+|---|----------------|------------------|----------------------|
+| 1 | `[paste]` | `[e.g. critique vs observation]` | `[which I chose and why, per the scope rule]` |
+| 2 | `[paste]` | | |
+| 3 | `[paste]` | | |
+
 ## 4. Method
 
-**Baseline — zero-shot (Groq `llama-3.3-70b-versatile`):** prompted with the §1
-label definitions and edge-case tiebreak rules, `temperature=0`, instructed to
-return only the label name. Unparseable responses are excluded from scoring.
+### 4.1 Fine-tuned model
 
-**Fine-tuned — `distilbert-base-uncased`:** 70/15/15 stratified split
-(`random_state=42`), `max_length=256`. Default hyperparameters: 3 epochs,
-learning rate `2e-5`, train batch size 16, weight decay `0.01`, 50 warmup steps;
-best model selected by validation accuracy.
+- **Base model:** `distilbert-base-uncased` with a 3-class sequence-classification head.
+- **Training setup:** 70/15/15 stratified train/val/test split (`random_state=42`),
+  tokenized at `max_length=256`, trained for 3 epochs with the best checkpoint
+  selected by validation accuracy. Evaluation is on the **locked test set** that
+  neither model sees during training/prompting.
+- **Hyperparameters:** 3 epochs, learning rate `2e-5`, train batch size 16, weight
+  decay `0.01`, 50 warmup steps.
 
-> **⬜ FILL IN — hyperparameter changes:** if you changed any default, state what
-> and why. If you used the defaults, say so explicitly.
+**Hyperparameter decision (≥1 required):** I kept the learning rate at **`2e-5`**
+and epochs at **3** rather than training longer. `2e-5` is the standard fine-tuning
+rate for BERT-family models, and with only ~200 examples, more epochs mainly risk
+**overfitting** to a small training set — exactly the failure the §5.4 reflection
+checks for. I treated 3 epochs / `2e-5` as a deliberate floor and would only have
+increased them if validation accuracy were still climbing at epoch 3.
 
-Both models are evaluated on the **same locked test set**.
+> **⬜ FILL IN:** if you changed any default after seeing your run, state what and
+> why; otherwise confirm you used the justified defaults above.
+
+### 4.2 Baseline (zero-shot)
+
+- **Model:** Groq `llama-3.3-70b-versatile`, `temperature=0`, `max_tokens=20`.
+- **How results were collected:** every post in the **same locked test set** is sent
+  to the model one at a time with the system prompt below; the response is lowercased
+  and matched against the valid label names (longest-first to avoid substring
+  collisions). Responses that match no label are counted as **unparseable and
+  excluded** from accuracy. (If >~10% are unparseable, the prompt needs tightening.)
+- **Prompt used** (Section 5 of the notebook, aligned to `planning.md` §2–3):
+
+```
+You are classifying posts from the r/TrueFilm community by their PRIMARY intent.
+Assign each post to exactly one of the following three categories.
+
+critique: A long-form, structured argument that analyzes a film's narrative, themes,
+historical context, or overall artistic merit as a whole work.
+observation: A focused comment on a single technical element, one specific scene, or
+an individual performance, rather than the work as a whole.
+inquiry: A post whose primary purpose is to ask a question or prompt community
+discussion about a director, genre, film, or idea.
+
+How to decide between close cases:
+- If the analysis is anchored to a single scene, shot, performance, or technical
+  choice, label it observation. If it makes a claim about the work as a whole,
+  label it critique.
+- If removing the question still leaves a complete, self-standing argument, it is
+  critique. If removing the question leaves nothing substantive, it is inquiry.
+
+Respond with ONLY the label name: critique, observation, or inquiry.
+```
+
+(Each label in the prompt also carries one worked example; see the notebook cell for
+the full text.)
 
 ---
 
